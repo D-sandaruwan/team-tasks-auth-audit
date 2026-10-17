@@ -68,8 +68,25 @@ create policy "see team tasks" on public.tasks for select
 create policy "create tasks in own team" on public.tasks for insert
   with check (team_id = public.current_team_id());
 
--- ---------- Seed (run AFTER you've signed up once) ----------
+-- ---------- Seed (run AFTER you've signed up once, one statement at a time) ----------
 -- insert into public.teams (name) values ('Acme') returning id;
 -- update public.profiles
 --   set team_id = '<TEAM_ID>', role = 'admin'
 --   where id = (select id from auth.users where email = 'you@example.com');
+
+-- ---------- F-1 fix: assignee must be on the task's team ----------
+create function public.check_assignee_team() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.assigned_to is not null and not exists (
+    select 1 from public.profiles
+    where id = new.assigned_to and team_id = new.team_id
+  ) then
+    raise exception 'Assignee must belong to the same team';
+  end if;
+  return new;
+end $$;
+
+create trigger tasks_assignee_team
+  before insert or update of assigned_to, team_id on public.tasks
+  for each row execute function public.check_assignee_team();
